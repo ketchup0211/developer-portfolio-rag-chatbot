@@ -19,7 +19,7 @@ async function fetchCardDetail(id, { force = false } = {}) {
 
 export default function CardDetailPage() {
   const { id } = useParams();
-  const { user } = useAuth();
+  const { isOwner } = useAuth();
   const [card, setCard] = useState(null);
   const [blocks, setBlocks] = useState(null);
   const [error, setError] = useState("");
@@ -74,7 +74,7 @@ export default function CardDetailPage() {
           card={card}
           blocks={blocks}
           topbar={
-            user && (
+            isOwner && (
               <div className="notion-page-topbar">
                 <button type="button" onClick={handleRefresh} disabled={refreshing}>
                   {refreshing ? "새로고침 중..." : "노션에서 새로고침"}

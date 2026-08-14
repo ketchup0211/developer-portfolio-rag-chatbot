@@ -627,6 +627,64 @@ button[type="submit"]:disabled {
   cursor: pointer;
 }
 
+/* 대화 기록 관리 화면 (DESIGN.md 1.5, PLAN 13번) */
+.session-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  list-style: none;
+}
+
+.session-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  width: 100%;
+  padding: 0.9rem 1rem;
+  border: 1px solid #eee;
+  border-radius: 8px;
+  background: #fff;
+  cursor: pointer;
+  font-size: 0.95rem;
+  text-align: left;
+}
+
+.session-row-unread {
+  border-color: #111;
+  font-weight: 700;
+}
+
+.session-row-label {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.session-unread-dot {
+  display: inline-block;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 999px;
+  background: #c00;
+}
+
+.session-row-time {
+  font-size: 0.8rem;
+  color: #777;
+  white-space: nowrap;
+}
+
+.session-back-button {
+  padding: 0;
+  border: none;
+  background: none;
+  color: #111;
+  text-decoration: underline;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
 .chat-limit-notice {
   color: #c00;
   font-size: 0.85rem;

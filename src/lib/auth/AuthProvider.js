@@ -3,10 +3,14 @@
 // 로그인 상태를 앱 전체에서 공유하기 위한 컨텍스트입니다.
 // Supabase Auth를 브라우저에서 직접 사용하므로, 서버 세션 없이
 // 브라우저에 저장된 로그인 정보를 읽어와 상태로 관리합니다.
+//
+// PLAN 10번(방문자 익명 로그인)부터는 `user`가 owner(이메일 로그인)뿐 아니라
+// 챗봇 화면에서 자동으로 로그인된 익명 방문자일 수도 있다. owner 전용 화면·버튼은
+// `user` 존재 여부만으로는 부족하고, 반드시 `isOwner`(익명이 아님)로 판단해야 한다.
 import { createContext, useContext, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 
-const AuthContext = createContext({ user: null, loading: true });
+const AuthContext = createContext({ user: null, isOwner: false, loading: true });
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
@@ -32,8 +36,10 @@ export function AuthProvider({ children }) {
     return () => subscription.unsubscribe();
   }, []);
 
+  const isOwner = !!user && !user.is_anonymous;
+
   return (
-    <AuthContext.Provider value={{ user, loading }}>
+    <AuthContext.Provider value={{ user, isOwner, loading }}>
       {children}
     </AuthContext.Provider>
   );

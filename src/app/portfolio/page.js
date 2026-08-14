@@ -22,7 +22,7 @@ async function fetchNotionCards({ force = false } = {}) {
 }
 
 export default function PortfolioPage() {
-  const { user } = useAuth();
+  const { isOwner } = useAuth();
   const [cards, setCards] = useState(null);
   const [databaseUrl, setDatabaseUrl] = useState("");
   const [error, setError] = useState("");
@@ -101,7 +101,7 @@ export default function PortfolioPage() {
           }}
         >
           <h1 style={{ fontSize: "1.3rem" }}>내 포트폴리오</h1>
-          {user && (
+          {isOwner && (
             <div style={{ display: "flex", gap: "0.5rem" }}>
               <button
                 type="button"
@@ -125,7 +125,7 @@ export default function PortfolioPage() {
           )}
         </div>
         <p style={{ color: "#777", fontSize: "0.85rem", marginTop: "0.4rem" }}>
-          {user
+          {isOwner
             ? '프로젝트 카드는 Notion Database에서 작성·수정합니다. 이 화면은 그 내용을 읽기 전용으로 보여줍니다. "노션에서 다시 불러오기"를 누르면 화면 내용과 함께 챗봇이 검색할 내용(임베딩)도 최신 상태로 갱신됩니다.'
             : "프로젝트 카드는 Notion Database에서 작성·수정합니다. 이 화면은 그 내용을 읽기 전용으로 보여줍니다."}
         </p>
