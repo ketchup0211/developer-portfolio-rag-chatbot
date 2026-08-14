@@ -13,7 +13,7 @@ export async function GET(request, { params }) {
 
     const { data: link, error: linkError } = await supabase
       .from("invite_links")
-      .select("user_id, is_active")
+      .select("id, user_id, is_active")
       .eq("token", token)
       .maybeSingle();
 
@@ -32,6 +32,10 @@ export async function GET(request, { params }) {
 
     return NextResponse.json({
       valid: true,
+      // 대화 세션(chat_sessions)은 초대 링크 id + 방문자 uid로 구분되는데, invite_links는
+      // owner 본인만 RLS로 조회할 수 있어 방문자 브라우저가 직접 알아낼 수 없다. 그래서
+      // 이미 서비스 role로 링크를 확인한 이 응답에 실어서 함께 내려준다(비밀 값 아님).
+      inviteLinkId: link.id,
       ownerName: metadata.name || "",
       ownerContact: metadata.contact || "",
     });

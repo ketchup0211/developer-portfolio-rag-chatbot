@@ -1,13 +1,16 @@
 "use client";
 
-// RAG 챗봇 화면 (인사 담당자 전용, DESIGN.md 1.7) — PLAN 8번: 화면 UI까지만 만든다.
-// 실제 유사도 검색·답변 생성 API(POST /api/public/[token]/chat)는 아직 없어서, 지금 질문을
-// 보내면 항상 실패 응답으로 처리되어 정해진 오류 문구가 뜬다. 이 흐름은 PLAN 9번에서 그
-// API가 만들어지면 그대로 이어받아 정상 동작한다. 30회 질문 제한(PLAN 12번)과 방문자
-// 익명 로그인(PLAN 10번)도 아직 연결되지 않았다.
+// RAG 챗봇 화면 (인사 담당자 전용, DESIGN.md 1.7, 2.2) — PLAN 8·9·10번.
+// 화면을 열면 뒤에서 Supabase 익명 로그인이 자동으로 이루어져 이 브라우저만의 방문자
+// uid를 갖게 되고, 대화는 "초대 링크(토큰) + 방문자 uid" 세션 단위로 서버(API Route)가
+// chat_sessions/chat_messages에 저장한다. 새로고침해도 같은 uid로 이전 대화를 이어볼 수
+// 있도록, 화면 진입 시 Supabase에서 직접(RLS로 보호됨) 그 세션의 지난 대화를 불러온다.
+// 30회 질문 제한(PLAN 12번)은 아직 연결되지 않았다.
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
+import { createClient } from "@/lib/supabase/client";
+import { useAuth } from "@/lib/auth/AuthProvider";
 
 async function fetchLinkInfo(token) {
   const res = await fetch(`/api/public/${token}`);
@@ -16,17 +19,27 @@ async function fetchLinkInfo(token) {
   return data;
 }
 
-let nextMessageId = 1;
+function toBubble(row) {
+  return {
+    id: row.id,
+    role: row.role,
+    content: row.content,
+    sourceCardIds: (row.chat_message_sources || []).map((s) => s.notion_page_id),
+  };
+}
 
 export default function PublicChatPage() {
   const { token } = useParams();
+  const { user, loading: authLoading } = useAuth();
   const [linkInfo, setLinkInfo] = useState(null);
   const [linkError, setLinkError] = useState("");
   const [messages, setMessages] = useState([]);
+  const [historyLoaded, setHistoryLoaded] = useState(false);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const listEndRef = useRef(null);
 
+  // 1. 초대 링크 유효성 확인
   useEffect(() => {
     let active = true;
     fetchLinkInfo(token)
@@ -41,6 +54,58 @@ export default function PublicChatPage() {
     };
   }, [token]);
 
+  // 2. 아직 로그인(익명 포함) 상태가 아니면 방문자로 익명 로그인한다.
+  useEffect(() => {
+    if (authLoading || user) return;
+    let active = true;
+    async function signInAnonymously() {
+      const supabase = createClient();
+      const { error } = await supabase.auth.signInAnonymously();
+      if (error && active) {
+        setLinkError("방문자 로그인에 실패했습니다. 새로고침 후 다시 시도해주세요.");
+      }
+    }
+    signInAnonymously();
+    return () => {
+      active = false;
+    };
+  }, [authLoading, user]);
+
+  // 3. 링크와 방문자 로그인이 모두 준비되면, 이 방문자의 지난 대화를 불러온다.
+  useEffect(() => {
+    if (!linkInfo?.valid || !user) return;
+    let active = true;
+    async function loadHistory() {
+      const supabase = createClient();
+      const { data: session } = await supabase
+        .from("chat_sessions")
+        .select("id")
+        .eq("invite_link_id", linkInfo.inviteLinkId)
+        .eq("visitor_user_id", user.id)
+        .maybeSingle();
+
+      if (!session) {
+        if (active) setHistoryLoaded(true);
+        return;
+      }
+
+      const { data: rows } = await supabase
+        .from("chat_messages")
+        .select("id, role, content, chat_message_sources(notion_page_id)")
+        .eq("chat_session_id", session.id)
+        .order("created_at", { ascending: true });
+
+      if (active) {
+        setMessages((rows || []).map(toBubble));
+        setHistoryLoaded(true);
+      }
+    }
+    loadHistory();
+    return () => {
+      active = false;
+    };
+  }, [linkInfo, user]);
+
   useEffect(() => {
     listEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, sending]);
@@ -48,19 +113,27 @@ export default function PublicChatPage() {
   async function handleSend(event) {
     event.preventDefault();
     const question = input.trim();
-    if (!question || sending) return;
+    if (!question || sending || !user) return;
 
     setMessages((prev) => [
       ...prev,
-      { id: nextMessageId++, role: "visitor", content: question },
+      { id: `local-${Date.now()}`, role: "visitor", content: question },
     ]);
     setInput("");
     setSending(true);
 
     try {
+      const supabase = createClient();
+      const {
+        data: { session: authSession },
+      } = await supabase.auth.getSession();
+
       const res = await fetch(`/api/public/${token}/chat`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${authSession?.access_token || ""}`,
+        },
         body: JSON.stringify({ message: question }),
       });
       const data = await res.json();
@@ -69,19 +142,19 @@ export default function PublicChatPage() {
       setMessages((prev) => [
         ...prev,
         {
-          id: nextMessageId++,
+          id: `local-${Date.now()}-a`,
           role: "assistant",
           content: data.answer,
           sourceCardIds: data.sourceCardIds || [],
         },
       ]);
     } catch {
-      // 응답 API가 아직 없거나(PLAN 9번 이전) OpenAI 호출이 실패한 경우 모두
-      // CLAUDE.md에 정해진 문구로만 안내한다.
+      // 응답 API 호출 자체가 실패한 경우(네트워크 오류 등)에도 CLAUDE.md에 정해진
+      // 문구로만 안내한다. OpenAI 호출 실패는 서버가 이미 같은 문구를 답으로 보낸다.
       setMessages((prev) => [
         ...prev,
         {
-          id: nextMessageId++,
+          id: `local-${Date.now()}-e`,
           role: "assistant",
           content:
             "죄송합니다. 오류로 인해 현재 챗봇 서비스 사용이 불가합니다. 다시 시도해주세요.",
@@ -101,6 +174,8 @@ export default function PublicChatPage() {
       "width=760,height=900,noopener,noreferrer"
     );
   }
+
+  const ready = linkInfo?.valid && user && historyLoaded;
 
   return (
     <>
@@ -123,7 +198,11 @@ export default function PublicChatPage() {
         </p>
       )}
 
-      {linkInfo?.valid && (
+      {linkInfo?.valid && !ready && !linkError && (
+        <p style={{ padding: "1.5rem" }}>불러오는 중...</p>
+      )}
+
+      {ready && (
         <div className="chat-page">
           <div className="chat-message-list">
             {messages.length === 0 && (

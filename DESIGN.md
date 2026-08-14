@@ -133,6 +133,24 @@
 
 > 참고: 프로젝트 카드 원문은 더 이상 Supabase 표(`project_cards`)에 저장하지 않고 Notion Database에 있으므로, 그 접근 통제는 RLS가 아니라 "`NOTION_API_KEY`를 서버 쪽 코드만 갖고 있다"는 것으로 이뤄집니다(3.2절 참고).
 
+### 3.5 Supabase 프로젝트 설정 (SQL 마이그레이션이 아닌, Auth 설정값)
+
+방문자 익명 로그인(PLAN 10번)이 동작하려면, 코드/마이그레이션과 별개로 Supabase 프로젝트의
+Auth 설정 두 가지가 켜져 있어야 합니다(대시보드의 Authentication → Sign In / Providers,
+또는 Management API `PATCH /v1/projects/:ref/config/auth`).
+
+| 설정 | 값 | 이유 |
+|---|---|---|
+| `external_anonymous_users_enabled` (Anonymous sign-ins) | 켜짐 | 방문자가 `signInAnonymously()`로 로그인 식별자(uid)를 받으려면 필요 |
+| `disable_signup` (Allow new user signups) | **꺼짐**(= 가입 허용) | 이 프로젝트의 Supabase 버전에서는 이 값이 꺼져 있으면(가입 금지) 익명 로그인도 함께 막힘 |
+
+`disable_signup`을 끄면 이론상 누구나 Supabase Auth API로 이메일/비밀번호 회원가입도 시도할 수
+있게 됩니다. owner 계정은 웹사이트에 회원가입 화면을 두지 않는다는 원칙(CLAUDE.md)이 깨지지
+않도록, 서버의 owner 확인 로직(`getOwnerFromRequest`, 3.2·5절 API들이 공통으로 사용)은 "로그인
+했고 익명이 아님"뿐 아니라 **이메일이 `.env`의 `OWNER_EMAIL`과 정확히 일치하는지**까지 함께
+확인합니다. 즉 누군가 새로 이메일 계정을 만들어도 owner 전용 기능(노션 동기화 등)은 실제 owner
+계정으로만 통과합니다.
+
 ---
 
 ## 4. 데이터베이스 표 설계 (제안)

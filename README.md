@@ -46,6 +46,7 @@ npm run dev
 | `NOTION_API_KEY` | Notion API 인증 (서버 전용) |
 | `NOTION_DATABASE_ID` | 포트폴리오 카드가 담긴 Notion Database ID |
 | `OPENAI_API_KEY` | 임베딩·챗봇 답변 생성 (서버 전용) |
+| `OWNER_EMAIL` | owner 전용 API가 "실제 owner 계정인지" 서버에서 판별할 때 사용 (서버 전용) |
 
 비밀 키가 필요한 기능(챗봇 응답 생성, Notion/임베딩 동기화)은 모두 Next.js 서버(API Route)를
 거치며, 클라이언트에는 절대 노출되지 않습니다.
