@@ -7,6 +7,12 @@
 // 있도록, 화면 진입 시 Supabase에서 직접(RLS로 보호됨) 그 세션의 지난 대화를 불러온다.
 // 이 초대 링크가 (모든 방문자를 합쳐) 이미 30번 질문을 받았다면(PLAN 12번), 화면에
 // 들어오자마자 또는 질문을 보내는 순간 입력칸이 비활성화되고 안내 문구만 보인다.
+//
+// CLAUDE.md 규칙: "RAG 챗봇은 인사 담당자 전용이다. 지원자 본인은 챗봇을 사용하지 않는다."
+// owner 계정으로 로그인된 브라우저로 이 화면에 들어오면(자기 링크 테스트 등) 이미 로그인된
+// 사람이 있으니 새 익명 로그인을 만들지 않고 owner 계정을 그대로 "방문자"로 써버리는 문제가
+// 있었다(질문 열람함에 owner 본인의 대화가 섞이고 30회 한도도 함께 줄어듦). 그래서 owner로
+// 로그인된 상태면 애초에 채팅 자체를 막고 안내만 보여준다(서버에도 동일한 차단을 둔다).
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
@@ -31,7 +37,7 @@ function toBubble(row) {
 
 export default function PublicChatPage() {
   const { token } = useParams();
-  const { user, loading: authLoading } = useAuth();
+  const { user, isOwner, loading: authLoading } = useAuth();
   const [linkInfo, setLinkInfo] = useState(null);
   const [linkError, setLinkError] = useState("");
   const [messages, setMessages] = useState([]);
@@ -59,6 +65,8 @@ export default function PublicChatPage() {
   }, [token]);
 
   // 2. 아직 로그인(익명 포함) 상태가 아니면 방문자로 익명 로그인한다.
+  // (owner로 이미 로그인돼 있으면 이 조건에서 자연히 건너뛰어진다 — user가 이미 있으므로.
+  // 그 경우 채팅 자체를 막는 처리는 아래 렌더링 부분에서 isOwner로 따로 한다.)
   useEffect(() => {
     if (authLoading || user) return;
     let active = true;
@@ -76,8 +84,9 @@ export default function PublicChatPage() {
   }, [authLoading, user]);
 
   // 3. 링크와 방문자 로그인이 모두 준비되면, 이 방문자의 지난 대화를 불러온다.
+  // (owner 로그인 상태면 애초에 채팅을 막을 것이므로 여기서도 불러올 필요가 없다.)
   useEffect(() => {
-    if (!linkInfo?.valid || !user) return;
+    if (!linkInfo?.valid || !user || isOwner) return;
     let active = true;
     async function loadHistory() {
       const supabase = createClient();
@@ -108,7 +117,7 @@ export default function PublicChatPage() {
     return () => {
       active = false;
     };
-  }, [linkInfo, user]);
+  }, [linkInfo, user, isOwner]);
 
   useEffect(() => {
     listEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -117,7 +126,7 @@ export default function PublicChatPage() {
   async function handleSend(event) {
     event.preventDefault();
     const question = input.trim();
-    if (!question || sending || !user || limitReached) return;
+    if (!question || sending || !user || isOwner || limitReached) return;
 
     const localId = `local-${Date.now()}`;
     setMessages((prev) => [...prev, { id: localId, role: "visitor", content: question }]);
@@ -184,7 +193,7 @@ export default function PublicChatPage() {
     );
   }
 
-  const ready = linkInfo?.valid && user && historyLoaded;
+  const ready = linkInfo?.valid && user && !isOwner && historyLoaded;
 
   return (
     <>
@@ -207,7 +216,14 @@ export default function PublicChatPage() {
         </p>
       )}
 
-      {linkInfo?.valid && !ready && !linkError && (
+      {linkInfo?.valid && isOwner && (
+        <p style={{ padding: "1.5rem", color: "#555" }}>
+          현재 owner 계정으로 로그인되어 있어 이 챗봇을 사용할 수 없습니다. RAG 챗봇은
+          인사 담당자 전용 기능입니다. 로그아웃하거나 시크릿(비공개) 창에서 열어주세요.
+        </p>
+      )}
+
+      {linkInfo?.valid && !isOwner && !ready && !linkError && (
         <p style={{ padding: "1.5rem" }}>불러오는 중...</p>
       )}
 

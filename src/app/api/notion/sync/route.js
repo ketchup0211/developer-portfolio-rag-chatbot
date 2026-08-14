@@ -6,7 +6,7 @@ import { NextResponse } from "next/server";
 import { getNotionClient, getDatabaseInfo } from "@/lib/notion/client";
 import { extractCardSummary } from "@/lib/notion/properties";
 import { fetchBlocksRecursive } from "@/lib/notion/blocks";
-import { buildSearchableText } from "@/lib/notion/searchableText";
+import { buildSearchableText, buildCardSummaryText } from "@/lib/notion/searchableText";
 import { chunkText } from "@/lib/notion/chunk";
 import { getOpenAIClient } from "@/lib/openai/client";
 import { getSupabaseServiceClient } from "@/lib/supabase/serviceClient";
@@ -43,7 +43,9 @@ export async function POST(request) {
       try {
         const blocks = await fetchBlocksRecursive(card.id);
         const text = await buildSearchableText(card, blocks);
-        const chunks = chunkText(text);
+        const bodyChunks = chunkText(text);
+        // 제목+속성 요약은 본문과 별개로 항상 조각 1개를 추가로 만든다(요약 전용 조각).
+        const summaryText = buildCardSummaryText(card);
 
         // 이 카드의 기존 조각을 지우고 새로 만든다(다시 불러올 때마다 완전히 갱신).
         const { error: deleteError } = await supabase
@@ -52,24 +54,30 @@ export async function POST(request) {
           .eq("notion_page_id", card.id);
         if (deleteError) throw deleteError;
 
-        if (chunks.length > 0) {
+        const inputs = summaryText ? [summaryText, ...bodyChunks] : bodyChunks;
+        const chunkTypes = summaryText
+          ? ["summary", ...bodyChunks.map(() => "body")]
+          : bodyChunks.map(() => "body");
+
+        if (inputs.length > 0) {
           const embeddingRes = await openai.embeddings.create({
             model: EMBEDDING_MODEL,
-            input: chunks,
+            input: inputs,
           });
           const sorted = [...embeddingRes.data].sort((a, b) => a.index - b.index);
 
-          const rows = chunks.map((content, i) => ({
+          const rows = inputs.map((content, i) => ({
             notion_page_id: card.id,
             content,
             embedding: sorted[i].embedding,
+            chunk_type: chunkTypes[i],
           }));
 
           const { error: insertError } = await supabase.from("portfolio_chunks").insert(rows);
           if (insertError) throw insertError;
         }
 
-        results.push({ id: card.id, title: card.title, chunks: chunks.length, ok: true });
+        results.push({ id: card.id, title: card.title, chunks: bodyChunks.length, ok: true });
       } catch (err) {
         console.error("카드 동기화 실패:", card.id, err);
         results.push({ id: card.id, title: card.title, ok: false, error: err.message });
