@@ -10,6 +10,9 @@ const nextConfig = {
   turbopack: {
     root: __dirname,
   },
+  // pdf-parse(내부적으로 pdfjs-dist 사용)는 서버 번들에 그대로 묶이면 워커 파일 경로를
+  // 못 찾는 문제가 있어, Next가 번들링하지 않고 Node의 require로 직접 불러오게 한다.
+  serverExternalPackages: ["pdf-parse"],
 };
 
 export default nextConfig;
