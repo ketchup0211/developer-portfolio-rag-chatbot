@@ -1,0 +1,36 @@
+# 비밀 값 (절대 커밋 금지)
+.env
+.env*.local
+
+# 의존성 모듈 (용량이 크고 재설치 가능)
+node_modules
+
+# Next.js 빌드 산출물
+.next/
+out/
+build/
+
+# 기타
+.DS_Store
+*.pem
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Vercel
+.vercel
+
+# TypeScript(사용 시)
+*.tsbuildinfo
+next-env.d.ts
+.env*
+
+# bkit 플러그인 로컬 실행 상태 (소스코드 아님, 커밋 대상 아님)
+.bkit/
+
+# Claude Code 개인 로컬 설정 (launch.json 등 공유용 설정은 유지)
+.claude/settings.local.json
+
+# 삭제 대기 중인 파일 보관함 (프로젝트 산출물 아님)
+trash-can/
