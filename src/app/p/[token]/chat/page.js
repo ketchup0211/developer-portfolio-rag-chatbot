@@ -18,12 +18,22 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/lib/auth/AuthProvider";
+import { propertyValueToPlainText } from "@/lib/notion/properties";
 
 async function fetchLinkInfo(token) {
   const res = await fetch(`/api/public/${token}`);
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || "링크를 확인하지 못했습니다.");
   return data;
+}
+
+async function fetchNotionCards() {
+  // 출처 칩에 마우스를 올렸을 때 보여줄 제목/아이콘/속성 미리보기용. 카드 목록 조회는
+  // 로그인 없이도 쓸 수 있는 공개 API라 지원자 이름 등과 무관하게 항상 호출해도 된다.
+  const res = await fetch("/api/notion/cards");
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "카드 목록을 불러오지 못했습니다.");
+  return data.cards || [];
 }
 
 function toBubble(row) {
@@ -45,7 +55,24 @@ export default function PublicChatPage() {
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [limitReached, setLimitReached] = useState(false);
+  const [cardsById, setCardsById] = useState({});
   const listEndRef = useRef(null);
+
+  // 0. 출처 칩 미리보기에 쓸 카드 제목/아이콘/속성을 미리 한 번 받아둔다.
+  useEffect(() => {
+    let active = true;
+    fetchNotionCards()
+      .then((cards) => {
+        if (!active) return;
+        setCardsById(Object.fromEntries(cards.map((card) => [card.id, card])));
+      })
+      .catch(() => {
+        // 미리보기는 부가 기능이므로 실패해도 챗봇 사용 자체를 막지 않는다.
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   // 1. 초대 링크 유효성 확인 (이미 30회를 다 썼다면 limitReached도 함께 내려온다)
   useEffect(() => {
@@ -185,7 +212,8 @@ export default function PublicChatPage() {
   }
 
   function openSourcePopup(cardId) {
-    // CLAUDE.md 규칙: 출처는 반드시 새 팝업창으로 연다.
+    // CLAUDE.md 규칙: 출처는 반드시 새 팝업창으로 연다. 근거 카드가 여러 개면(DESIGN.md 2.3)
+    // 카드마다 별도의 칩을 보여주고, 칩을 클릭하면 그 카드 하나만 담아 새 팝업창을 연다.
     window.open(
       `/p/${token}/cards/${cardId}`,
       "portfolio-source",
@@ -241,16 +269,44 @@ export default function PublicChatPage() {
                 <p>{message.content}</p>
                 {message.role === "assistant" && message.sourceCardIds?.length > 0 && (
                   <div className="chat-source-buttons">
-                    {message.sourceCardIds.map((cardId) => (
-                      <button
-                        key={cardId}
-                        type="button"
-                        className="chat-source-button"
-                        onClick={() => openSourcePopup(cardId)}
-                      >
-                        출처
-                      </button>
-                    ))}
+                    {message.sourceCardIds.map((cardId) => {
+                      const card = cardsById[cardId];
+                      const metaLines = card
+                        ? card.properties
+                            .map((p) => propertyValueToPlainText(p.type, p.value))
+                            .filter(Boolean)
+                            .slice(0, 2)
+                        : [];
+                      return (
+                        <span key={cardId} className="chat-source-chip-wrap">
+                          <button
+                            type="button"
+                            className="chat-source-chip"
+                            onClick={() => openSourcePopup(cardId)}
+                          >
+                            {card?.icon?.type === "emoji" && (
+                              <span className="chat-source-chip-icon">{card.icon.value}</span>
+                            )}
+                            <span className="chat-source-chip-title">
+                              {card?.title || "출처"}
+                            </span>
+                          </button>
+                          {/* 마우스를 올리면(호버) 카드 제목·속성 미리보기를 보여주고,
+                              클릭하면 그 근거 카드 원문을 새 팝업창으로 연다(DESIGN.md 2.3). */}
+                          <div className="chat-source-preview">
+                            <p className="chat-source-preview-title">
+                              {card?.icon?.type === "emoji" && <span>{card.icon.value}</span>}
+                              <span>{card?.title || "출처 확인 중..."}</span>
+                            </p>
+                            {metaLines.map((line, index) => (
+                              <p className="chat-source-preview-meta" key={index}>
+                                {line}
+                              </p>
+                            ))}
+                          </div>
+                        </span>
+                      );
+                    })}
                   </div>
                 )}
               </div>

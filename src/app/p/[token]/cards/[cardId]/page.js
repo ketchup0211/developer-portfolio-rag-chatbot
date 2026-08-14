@@ -1,9 +1,13 @@
 "use client";
 
 // 프로젝트 카드 상세 (인사 담당자용, DESIGN.md 1.6, 2.3) — 초대 링크로 들어온 사람이
-// 카드 목록에서 클릭했을 때, 그리고 챗봇 출처 버튼으로 팝업을 열 때 이 경로를 함께 쓴다.
+// 카드 목록에서 클릭했을 때, 그리고 챗봇 출처 칩을 클릭해 팝업을 열 때 이 경로를 함께 쓴다.
 // 렌더링은 /portfolio/[id]와 같은 CardDetailView 컴포넌트를 재사용하고, owner 전용
 // 버튼("노션에서 편집" 등)은 넘기지 않는다. 비활성 링크면 안내 문구만 보여준다.
+//
+// 출처가 여러 개인 답변은 챗봇 화면에서 근거 카드마다 별도의 칩으로 보여주고, 칩을
+// 클릭하면 그 근거 카드 하나만 담아 이 경로를 새 팝업창으로 연다(DESIGN.md 2.3) —
+// 이 화면 자체는 항상 카드 1개만 보여주면 된다.
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
