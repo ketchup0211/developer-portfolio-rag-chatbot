@@ -134,7 +134,7 @@
 
 | 표 이름 | 설명 | 주요 항목 |
 |---|---|---|
-| **users** (회원) | 지원자(owner) 계정 — Supabase에 관리자가 직접 등록해두는 1건뿐 | id, email, 이름, 연락처, 비밀번호(Supabase Auth가 관리), 가입일 |
+| **(users 표 없음)** | 지원자(owner) 계정 정보는 별도 표를 만들지 않는다. Supabase Auth가 관리하는 `auth.users`를 그대로 쓰고, 이름·연락처는 그 계정의 user_metadata에 저장한다(이미 "내 정보" 화면이 이 방식으로 구현되어 있음). 아래 표들의 `user_id`/`owner_user_id`/`visitor_user_id`는 모두 이 `auth.users.id`를 가리킨다 | — |
 | **project_cards** (프로젝트 카드) | 포트폴리오 안의 프로젝트 카드 | id, user_id, 제목, 개발 기간, 서비스 주소, GitHub 저장소, 개인의 역할, 기술 스택 및 선정 이유, 프로젝트 유형(개인/팀), 인원수, 첨부 파일 주소, 마크다운 설명, 트러블슈팅, 등록일, 수정일 |
 | **portfolio_chunks** (검색용 조각) | 카드 내용을 잘라 임베딩으로 저장 | id, project_card_id, 조각 원문, 임베딩 값, 생성일 |
 | **invite_links** (초대 링크) | 인사 담당자용 링크 | id, user_id, 토큰, 구분용 이름, 활성/비활성 상태, 발급일 |
