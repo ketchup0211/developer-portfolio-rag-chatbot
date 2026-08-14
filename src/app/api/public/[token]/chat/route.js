@@ -8,6 +8,7 @@ import { NextResponse } from "next/server";
 import { getSupabaseServiceClient } from "@/lib/supabase/serviceClient";
 import { getOpenAIClient } from "@/lib/openai/client";
 import { getVisitorFromRequest } from "@/lib/auth/verifyVisitorRequest";
+import { QUESTION_LIMIT, QUESTION_LIMIT_MESSAGE, countQuestions } from "@/lib/chat/questionLimit";
 
 const EMBEDDING_MODEL = "text-embedding-3-small";
 const CHAT_MODEL = "gpt-4o-mini";
@@ -169,6 +170,13 @@ export async function POST(request, { params }) {
   }
 
   try {
+    // 이 초대 링크가 이미 30회를 다 썼으면(같은 링크의 모든 방문자 합산), 세션·질문을
+    // 만들거나 저장하지 않고 AI도 부르지 않은 채 바로 안내 문구로 답한다(DESIGN.md 2.2 ①).
+    const questionCount = await countQuestions(supabase, link.id);
+    if (questionCount >= QUESTION_LIMIT) {
+      return NextResponse.json({ limitReached: true, error: QUESTION_LIMIT_MESSAGE });
+    }
+
     const sessionId = await findOrCreateSession(supabase, link.id, link.user_id, visitor.id);
 
     // 방문자의 질문을 먼저 세션에 저장한다.

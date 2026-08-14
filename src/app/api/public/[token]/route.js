@@ -4,6 +4,7 @@
 // 실제 프로젝트 카드 데이터는 이미 공개된 /api/notion/cards(/:id)에서 그대로 가져온다.
 import { NextResponse } from "next/server";
 import { getSupabaseServiceClient } from "@/lib/supabase/serviceClient";
+import { QUESTION_LIMIT, countQuestions } from "@/lib/chat/questionLimit";
 
 export async function GET(request, { params }) {
   const { token } = await params;
@@ -30,6 +31,11 @@ export async function GET(request, { params }) {
 
     const metadata = userData?.user?.user_metadata || {};
 
+    // 이 초대 링크(토큰)가 지금까지 받은 질문 수(같은 링크의 모든 방문자 합산, PLAN 12번).
+    // 챗봇 화면이 처음 열릴 때부터 이미 30회를 넘겼다면 입력칸을 바로 비활성화해야 하므로
+    // 여기서 함께 계산해 내려준다.
+    const questionCount = await countQuestions(supabase, link.id);
+
     return NextResponse.json({
       valid: true,
       // 대화 세션(chat_sessions)은 초대 링크 id + 방문자 uid로 구분되는데, invite_links는
@@ -38,6 +44,7 @@ export async function GET(request, { params }) {
       inviteLinkId: link.id,
       ownerName: metadata.name || "",
       ownerContact: metadata.contact || "",
+      limitReached: questionCount >= QUESTION_LIMIT,
     });
   } catch (err) {
     console.error("초대 링크 확인 실패:", err);

@@ -5,7 +5,8 @@
 // uid를 갖게 되고, 대화는 "초대 링크(토큰) + 방문자 uid" 세션 단위로 서버(API Route)가
 // chat_sessions/chat_messages에 저장한다. 새로고침해도 같은 uid로 이전 대화를 이어볼 수
 // 있도록, 화면 진입 시 Supabase에서 직접(RLS로 보호됨) 그 세션의 지난 대화를 불러온다.
-// 30회 질문 제한(PLAN 12번)은 아직 연결되지 않았다.
+// 이 초대 링크가 (모든 방문자를 합쳐) 이미 30번 질문을 받았다면(PLAN 12번), 화면에
+// 들어오자마자 또는 질문을 보내는 순간 입력칸이 비활성화되고 안내 문구만 보인다.
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
@@ -37,14 +38,17 @@ export default function PublicChatPage() {
   const [historyLoaded, setHistoryLoaded] = useState(false);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
+  const [limitReached, setLimitReached] = useState(false);
   const listEndRef = useRef(null);
 
-  // 1. 초대 링크 유효성 확인
+  // 1. 초대 링크 유효성 확인 (이미 30회를 다 썼다면 limitReached도 함께 내려온다)
   useEffect(() => {
     let active = true;
     fetchLinkInfo(token)
       .then((info) => {
-        if (active) setLinkInfo(info);
+        if (!active) return;
+        setLinkInfo(info);
+        setLimitReached(!!info.limitReached);
       })
       .catch((err) => {
         if (active) setLinkError(err.message);
@@ -113,12 +117,10 @@ export default function PublicChatPage() {
   async function handleSend(event) {
     event.preventDefault();
     const question = input.trim();
-    if (!question || sending || !user) return;
+    if (!question || sending || !user || limitReached) return;
 
-    setMessages((prev) => [
-      ...prev,
-      { id: `local-${Date.now()}`, role: "visitor", content: question },
-    ]);
+    const localId = `local-${Date.now()}`;
+    setMessages((prev) => [...prev, { id: localId, role: "visitor", content: question }]);
     setInput("");
     setSending(true);
 
@@ -138,6 +140,13 @@ export default function PublicChatPage() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "답변을 받지 못했습니다.");
+
+      if (data.limitReached) {
+        // 이 질문은 처리되지 않았으므로, 방금 화면에 낙관적으로 띄웠던 말풍선을 되돌린다.
+        setMessages((prev) => prev.filter((m) => m.id !== localId));
+        setLimitReached(true);
+        return;
+      }
 
       setMessages((prev) => [
         ...prev,
@@ -240,15 +249,19 @@ export default function PublicChatPage() {
             <div ref={listEndRef} />
           </div>
 
+          {limitReached && (
+            <p className="chat-limit-notice">질문 가능 횟수를 모두 사용했습니다</p>
+          )}
+
           <form className="chat-input-row" onSubmit={handleSend}>
             <input
               type="text"
               value={input}
               onChange={(event) => setInput(event.target.value)}
               placeholder="해당 챗봇이 제대로 확인하지 못하는 부분이 존재할 수도 있습니다."
-              disabled={sending}
+              disabled={sending || limitReached}
             />
-            <button type="submit" disabled={sending || !input.trim()}>
+            <button type="submit" disabled={sending || limitReached || !input.trim()}>
               보내기
             </button>
           </form>
