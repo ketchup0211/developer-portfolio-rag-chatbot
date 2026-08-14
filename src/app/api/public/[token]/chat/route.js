@@ -3,8 +3,17 @@
 // 조각"(chunk_type='summary', 항상 전부 포함)도 근거로 준다. "React 프로젝트 있어?",
 // "이런 역량 있어?"처럼 카드 하나가 아니라 포트폴리오 전체를 훑어야 답할 수 있는 질문에도
 // 답하고, 팀 인원·기간처럼 속성에만 있는 사실도 답할 수 있도록 하기 위해서다.
-// AI(gpt-4o-mini)에게 "이 자료로 답할 수 없으면 정해진 문구로만 답하라"를 강하게 지시하고,
-// 실제로 어떤 프로젝트를 근거로 썼는지도 함께 JSON으로 받아 출처 버튼에 정확히 반영한다.
+//
+// "팀 프로젝트 몇 개야?" 같은 질문에서 모델이 스스로 개수를 세다가 일부를 빠뜨리는 문제가
+// 있어서(한 번의 호출로 판단+개수+문장을 다 시키면 신뢰도가 떨어짐), 판단과 문장 작성을
+// 2단계로 분리했다.
+// 1단계(분류): 프로젝트마다 이 질문과 관련 있는지를 "독립적으로" true/false 판단시킨다.
+//   최종 근거 목록과 개수는 이 판단 결과 배열의 길이를 코드에서 세어 정하지, 모델이 답변
+//   문장 안에서 스스로 센 숫자를 신뢰하지 않는다(데이터 기반 정확성 확보).
+// 2단계(작성): 코드가 이미 확정한 프로젝트 목록만 모델에게 다시 주고, 그 목록 그대로
+//   자연스러운 문장으로 풀어 쓰게 한다. id는 이 단계에 아예 넘기지 않아 답변에 id가 섞일
+//   여지 자체를 없앤다.
+// 근거가 전혀 없으면(1단계 결과가 0개) 2단계를 부르지 않고 바로 정해진 문구로 확정한다.
 // 방문자는 Supabase 익명 로그인(anonymous sign-in) 상태여야 하며, 질문·답변은 모두
 // "초대 링크(토큰) + 방문자 uid" 단위 세션(chat_sessions/chat_messages)에 저장한다.
 import { NextResponse } from "next/server";
@@ -44,21 +53,32 @@ function stripProjectIds(text) {
     .trim();
 }
 
-const SYSTEM_PROMPT = `당신은 지원자의 포트폴리오를 근거로 인사 담당자의 질문에 답하는 채용 지원 챗봇입니다.
+// 1단계: 프로젝트마다 독립적으로 관련 여부를 판단시킨다. "전체 개수"나 "목록"을 한 번에
+// 만들게 하지 않고 항목 하나하나에 대해서만 참/거짓을 답하게 하면, 모델이 스스로 세다가
+// 빠뜨리는 실수를 코드가 배열 길이로 대신 세어 막을 수 있다.
+const CLASSIFY_SYSTEM_PROMPT = `당신은 지원자의 포트폴리오 프로젝트들을 인사 담당자의 질문과 하나씩 대조해 관련 여부를 판단하는 도우미입니다.
 
 [반드시 지킬 규칙]
-1. 아래 "프로젝트 자료"에 있는 내용만 근거로 답하세요. 거기 없는 사실은 절대로 추측하거나 지어내지 마세요.
-2. "이런 기술 써봤어?", "~프로젝트 있어?", "이런 역량 있어?", "이런 문제 해결할 수 있어?"처럼 특정 프로젝트 하나가 아니라 포트폴리오 전체를 봐야 답할 수 있는 질문에는, 아래 제공된 프로젝트 자료 전체를 빠짐없이 살펴 관련된 프로젝트를 모두 찾아 답하세요. 인사 담당자가 포트폴리오 내용을 전혀 모르는 상태로 물어봐도 답할 수 있어야 합니다.
-3. "프로젝트 자료"의 [전체 프로젝트 요약]에는 모든 프로젝트의 제목과 속성(기간·역할·인원 등)이 빠짐없이 들어 있습니다. 질문에 대한 답이 거기 있는데도 "확인하기 어렵다"고 답하지 마세요 — 자료를 다시 한번 꼼꼼히 확인한 뒤에만 규칙 4를 적용하세요.
-4. "몇 개", "모두", "전부", "각각" 등 개수를 세거나 전체 목록을 요구하는 질문에는, [전체 프로젝트 요약]에 적힌 "총 N개 프로젝트" 중 1번부터 N번까지 번호를 하나도 빠뜨리지 말고 순서대로 조건에 맞는지 확인한 뒤에만 답하세요. 일부만 확인하고 대략적인 개수나 목록을 말하지 마세요. 답변에 언급한 프로젝트 개수와 usedProjectIds 배열의 길이는 반드시 일치해야 합니다.
-5. 여러 프로젝트를 나열할 때는 제목만 쓰지 말고, 그 프로젝트가 어떤 프로젝트인지(무엇을 만들었는지, 어떤 문제를 다뤘는지 등) 프로젝트 자료 내용을 바탕으로 한두 문장씩 짧게 설명을 곁들이세요.
-6. 질문에 대한 근거를 프로젝트 자료 전체에서 정말로 전혀 찾을 수 없거나, 포트폴리오와 무관한 질문(일반 상식 등)일 때만 다른 말 없이 정확히 이 문장으로 답하세요: "${NO_EVIDENCE_ANSWER}"
-7. 근거가 있을 때는 지원자의 역량과 가능성을 자신감 있고 긍정적인 어조로 설명하세요. 관련 경험이 있다면 그 경험이 질문받은 역량과 어떻게 이어지는지 적극적으로 짚어 강점으로 소개하되, 프로젝트 자료에 없는 능력을 있다고 추측해서 덧붙이지는 마세요.
-8. 모든 답변은 한국어 존댓말로 작성하세요.
-9. "프로젝트 id: xxx"처럼 프로젝트 자료에 붙어 있는 id 문자열은 내부 참조용일 뿐입니다. answer 문장 안에는 그 id를 절대 그대로 옮겨 적지 마세요(사람이 읽는 문장에는 프로젝트 제목과 설명만 씁니다). id가 필요한 곳은 오직 아래 usedProjectIds 배열뿐입니다.
-10. 다른 텍스트 없이 아래 JSON 형식으로만 답하세요:
-{"answer": "실제 답변 문장 (id 없이, 제목과 설명 중심)", "usedProjectIds": ["실제로 답변에 사용한 프로젝트 자료의 id들"]}
-usedProjectIds는 answer가 규칙 6의 정해진 문구인 경우 반드시 빈 배열([])이어야 합니다.`;
+1. 아래 [프로젝트 자료]에 나열된 프로젝트를 처음부터 끝까지 하나도 빠짐없이 살펴보고, 각 프로젝트가 그 프로젝트 자료 내용만으로 볼 때 질문과 관련 있는지(relevant)를 다른 프로젝트와 무관하게 각각 독립적으로 판단하세요.
+2. 질문이 "이런 기술 써봤어?", "~프로젝트 있어?", "이런 역량/문제를 다뤄봤어?"처럼 넓은 질문이면, 프로젝트 자료에 조금이라도 관련 근거가 있는 프로젝트는 모두 relevant: true로 표시하세요.
+3. 질문이 "개인/팀 몇 명", "언제 진행" 같은 특정 속성 조건이면, 그 속성 값을 프로젝트 자료에서 정확히 확인해서 조건에 정말 맞을 때만 relevant: true로 표시하세요. 짐작하거나 다른 프로젝트와 헷갈리지 마세요.
+4. 프로젝트 자료에 없는 내용을 근거로 relevant: true를 주지 마세요. 포트폴리오와 무관한 질문(일반 상식 등)이면 모든 프로젝트를 relevant: false로 표시하세요.
+5. relevant가 true인 프로젝트에는 그 프로젝트가 무엇인지(무엇을 만들었는지, 어떤 문제를 다뤘는지 등) 프로젝트 자료 내용을 바탕으로 한두 문장 description을 쓰세요. relevant가 false면 description은 빈 문자열로 두세요.
+6. 다른 텍스트 없이 아래 JSON 형식으로만, [프로젝트 자료]에 있는 프로젝트 전부에 대해 하나씩 빠짐없이 답하세요:
+{"judgments": [{"id": "프로젝트 id", "relevant": true, "description": "설명 또는 빈 문자열"}]}`;
+
+// 2단계: 1단계에서 이미 확정된(코드가 필터링한) 프로젝트 목록만 넘겨 문장으로 풀어 쓰게
+// 한다. 이 단계에는 프로젝트 id를 아예 주지 않으므로 답변 문장에 id가 섞일 수 없다.
+const SYNTHESIZE_SYSTEM_PROMPT = `당신은 지원자의 포트폴리오를 근거로 인사 담당자의 질문에 답하는 채용 지원 챗봇입니다. 어떤 프로젝트가 근거가 되는지는 이미 정확히 정해져 있으니, 그 목록만 사용해 자연스러운 답변을 작성하세요.
+
+[반드시 지킬 규칙]
+1. 사용자 메시지에 주어진 목록의 프로젝트만 언급하세요. 목록에 없는 프로젝트를 언급하거나 지어내지 마세요.
+2. 목록에 있는 프로젝트는 하나도 빠짐없이 전부 답변에 포함하세요. 개수를 스스로 세거나 임의로 줄이지 마세요 — 목록에 있는 그대로가 정답입니다.
+3. 프로젝트 제목과 설명은 목록에 주어진 내용을 바탕으로 자연스럽게 풀어 쓰세요. 목록에 없는 사실을 추측해서 덧붙이지 마세요.
+4. 지원자의 역량과 가능성을 자신감 있고 긍정적인 어조로 설명하세요. 관련 경험이 질문받은 역량과 어떻게 이어지는지 적극적으로 짚어 강점으로 소개하세요.
+5. 프로젝트 id나 내부 식별자 같은 것은 답변에 절대 포함하지 마세요(목록에는 애초에 id가 없습니다). 프로젝트 제목과 설명만 사용하세요.
+6. 모든 답변은 한국어 존댓말로 작성하세요. 프로젝트 이름은 정확히 그대로 언급하세요.
+7. 다른 텍스트 없이 답변 문장만 그대로 출력하세요(JSON, 따옴표, 접두어 없이).`;
 
 // 카드별 요약(chunk_type='summary')은 유사도 점수와 무관하게 항상 전부 가져온다.
 async function fetchAllSummaries(supabase) {
@@ -68,6 +88,80 @@ async function fetchAllSummaries(supabase) {
     .eq("chunk_type", "summary");
   if (error) throw error;
   return data || [];
+}
+
+// 프로젝트 요약 본문(`제목: xxx`로 시작)에서 제목만 뽑아낸다. 2단계 프롬프트에는 id 없이
+// 제목만 넘기므로, 사람이 읽을 제목 표기를 항상 여기서 다시 뽑아 쓴다(모델이 새로 지어내지
+// 않도록 — 코드가 실제 데이터에서 가져온 제목만 신뢰한다).
+function extractTitle(summaryContent) {
+  const firstLine = (summaryContent || "").split("\n")[0] || "";
+  const match = firstLine.match(/^제목:\s*(.+)$/);
+  return match ? match[1].trim() : firstLine.trim() || "제목 미상";
+}
+
+function shuffled(array) {
+  const copy = [...array];
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy;
+}
+
+// 1단계 분류를 한 번 실행한다. gpt-4o-mini가 나열 순서에 따라 특정 프로젝트(주로 맨 앞
+// 항목)를 놓치는 위치 편향이 실제로 재현되어서(같은 질문·같은 프로젝트인데 순서만 바꾸면
+// 판단이 달라짐), 하나의 순서만 믿지 않고 여러 순서로 여러 번 물어본 뒤 합집합을 취한다
+// (아래 classifyRelevantProjects 참고). 이 함수는 그중 한 번의 호출만 담당한다.
+// summaryMap에는 일부러 카드 요약(제목+속성)만 담는다 — 본문 발췌까지 섞으면 특정
+// 프로젝트에 발췌가 몰릴 때 판단 자체가 불안정해지는 것을 반복 검증으로 확인했다.
+async function classifyOnce(openai, orderedIds, summaryMap, message) {
+  const manifest = orderedIds
+    .map((id, i) => `--- 프로젝트 ${i + 1}/${orderedIds.length} (id: ${id}) ---\n${summaryMap.get(id)}`)
+    .join("\n\n");
+
+  const res = await openai.chat.completions.create({
+    model: CHAT_MODEL,
+    temperature: 0,
+    response_format: { type: "json_object" },
+    messages: [
+      {
+        role: "system",
+        content: `${CLASSIFY_SYSTEM_PROMPT}\n\n[프로젝트 자료] 총 ${orderedIds.length}개\n${manifest}`,
+      },
+      { role: "user", content: message },
+    ],
+  });
+
+  const raw = res.choices?.[0]?.message?.content || "";
+  const parsed = JSON.parse(raw); // 실패하면 호출부의 catch에서 SERVICE_ERROR_ANSWER로 처리
+  return Array.isArray(parsed.judgments) ? parsed.judgments : [];
+}
+
+// 원래 순서·역순·무작위 순서 세 번을 병렬로 물어보고 관련 있다고 판단된 프로젝트의
+// 합집합을 취한다. 위치 편향으로 어느 한 순서에서 특정 프로젝트를 놓치더라도, 다른
+// 순서에서는 대부분 정상적으로 잡히기 때문에 결과가 훨씬 안정적이다("몇 개인지"는
+// 모델이 답변 문장 안에서 세는 숫자가 아니라, 이렇게 코드가 확정한 배열의 길이다).
+async function classifyRelevantProjects(openai, summaryMap, message) {
+  const original = [...summaryMap.keys()];
+  const orderings = [original, [...original].reverse(), shuffled(original)];
+
+  const results = await Promise.all(
+    orderings.map((ids) => classifyOnce(openai, ids, summaryMap, message))
+  );
+
+  const relevantIds = [];
+  const descriptionById = new Map();
+  for (const judgments of results) {
+    for (const j of judgments) {
+      if (!j || j.relevant !== true || !summaryMap.has(j.id)) continue;
+      if (!relevantIds.includes(j.id)) relevantIds.push(j.id);
+      // 여러 순서에서 같은 프로젝트가 relevant로 잡히면, 그중 설명이 채워진 것을 쓴다.
+      const desc = typeof j.description === "string" ? j.description.trim() : "";
+      if (desc && !descriptionById.get(j.id)) descriptionById.set(j.id, desc);
+    }
+  }
+
+  return { relevantIds, descriptionById };
 }
 
 // 질문과 포트폴리오 조각을 검색해 답변을 만든다. 실패하면 정해진 오류 문구를 답으로 돌려준다
@@ -101,60 +195,66 @@ async function generateAnswer(supabase, message) {
       return { answer: NO_EVIDENCE_ANSWER, sourceCardIds: [] };
     }
 
-    const knownProjectIds = new Set([
-      ...summaries.map((s) => s.notion_page_id),
-      ...detailMatches.map((m) => m.notion_page_id),
-    ]);
+    // 2. 프로젝트 요약 맵(id -> 요약 내용)과, 프로젝트별 본문 발췌 목록을 따로 만든다.
+    // 요약은 모든 카드에 대해 항상 존재하므로, 이 맵의 키가 곧 "전체 프로젝트 목록"이다.
+    // 1단계(관련 여부 판단)에는 일부러 본문 발췌를 섞지 않는다 — 실험해보니 본문 발췌를
+    // 함께 주면 특정 프로젝트에 발췌가 몰릴 때 판단이 흔들리는 경우가 있어서(예: 팀 프로젝트
+    // 개수를 물었는데 발췌가 많이 달린 프로젝트 하나 때문에 다른 프로젝트 판단이 무너짐),
+    // 요약만으로 판단할 때가 훨씬 안정적이었다(반복 검증 결과). 본문 발췌는 이미 관련 있다고
+    // 확정된 프로젝트의 설명을 풍부하게 하는 2단계(문장 작성)에서만 참고 자료로 쓴다.
+    const summaryMap = new Map(summaries.map((s) => [s.notion_page_id, s.content]));
+    const detailByProject = new Map();
+    for (const m of detailMatches) {
+      if (!detailByProject.has(m.notion_page_id)) detailByProject.set(m.notion_page_id, []);
+      detailByProject.get(m.notion_page_id).push(m.content);
+    }
 
-    // 2. 자료를 "프로젝트 id" 태그와 함께 정리해서 AI에게 통째로 전달한다. "몇 개/모두"류
-    // 질문에서 모델이 목록 중 일부를 건너뛰지 않도록, 총 개수와 번호를 명시적으로 붙인다
-    // (시스템 프롬프트 규칙 4가 이 번호를 근거로 빠짐없이 확인하라고 지시한다).
-    const summarySection = summaries
-      .map(
-        (s, i) =>
-          `--- 프로젝트 ${i + 1}/${summaries.length} (id: ${s.notion_page_id}) ---\n${s.content}`
-      )
-      .join("\n\n");
-    const detailSection = detailMatches
-      .map((m) => `--- 프로젝트 id: ${m.notion_page_id} (본문 발췌) ---\n${m.content}`)
-      .join("\n\n");
+    // 3. 1단계: 프로젝트마다 독립적으로 관련 여부를 판단시킨다(순서를 바꿔 3번 물어보고
+    // 합집합을 취해 위치 편향을 상쇄한다 — classifyRelevantProjects 참고). 최종 근거
+    // 목록/개수는 이 결과 배열을 코드가 세어 정한다 — 모델이 스스로 센 숫자를 신뢰하지 않는다.
+    const { relevantIds, descriptionById } = await classifyRelevantProjects(
+      openai,
+      summaryMap,
+      message
+    );
 
-    const context =
-      `[전체 프로젝트 요약] 총 ${summaries.length}개 프로젝트\n${summarySection || "(등록된 프로젝트 없음)"}` +
-      (detailSection ? `\n\n[질문과 관련성이 높은 본문 발췌]\n${detailSection}` : "");
+    // 근거가 하나도 없으면(1단계 결과가 0개) AI를 다시 부르지 않고 바로 정해진 문구로
+    // 확정한다 — "근거 없음" 판단도 모델 문장이 아니라 이 배열 길이로 결정한다.
+    if (relevantIds.length === 0) {
+      return { answer: NO_EVIDENCE_ANSWER, sourceCardIds: [] };
+    }
 
-    const chatRes = await openai.chat.completions.create({
+    // 4. 2단계: 이미 확정된 프로젝트 목록만 모델에게 다시 주고 문장으로 풀어 쓰게 한다.
+    // id는 여기서 아예 넘기지 않으므로 답변에 id가 섞일 여지 자체가 없다. 이 프로젝트에
+    // 관련성 높은 본문 발췌가 있으면 설명을 더 구체적으로 쓸 수 있도록 함께 참고시킨다.
+    const relevantList = relevantIds
+      .map((id, i) => {
+        const title = extractTitle(summaryMap.get(id));
+        const description = descriptionById.get(id) || "(설명 없음)";
+        const details = detailByProject.get(id);
+        const detailNote = details ? `\n   참고 본문 발췌: ${details.join(" / ")}` : "";
+        return `${i + 1}. ${title}: ${description}${detailNote}`;
+      })
+      .join("\n");
+
+    const synthesizeRes = await openai.chat.completions.create({
       model: CHAT_MODEL,
-      temperature: 0.2,
-      response_format: { type: "json_object" },
+      temperature: 0.3,
       messages: [
-        { role: "system", content: `${SYSTEM_PROMPT}\n\n[프로젝트 자료]\n${context}` },
-        { role: "user", content: message },
+        { role: "system", content: SYNTHESIZE_SYSTEM_PROMPT },
+        {
+          role: "user",
+          content: `인사 담당자 질문: "${message}"\n\n정확히 아래 ${relevantIds.length}개 프로젝트만 근거로 답변하세요(전부 언급하고, 목록 외 프로젝트는 언급하지 마세요):\n${relevantList}`,
+        },
       ],
     });
 
-    const raw = chatRes.choices?.[0]?.message?.content || "";
-    let parsed;
-    try {
-      parsed = JSON.parse(raw);
-    } catch {
-      throw new Error("모델 응답을 해석하지 못했습니다: " + raw.slice(0, 200));
+    const synthesizedAnswer = synthesizeRes.choices?.[0]?.message?.content?.trim();
+    if (!synthesizedAnswer) {
+      throw new Error("모델이 빈 답변을 반환했습니다.");
     }
 
-    const rawAnswer = typeof parsed.answer === "string" && parsed.answer.trim()
-      ? parsed.answer.trim()
-      : NO_EVIDENCE_ANSWER;
-    const answer = rawAnswer === NO_EVIDENCE_ANSWER ? rawAnswer : stripProjectIds(rawAnswer);
-
-    // 근거 없음 문구를 그대로 답한 경우에는 출처 버튼을 보이지 않는다. 모델이 존재하지 않는
-    // 프로젝트 id를 지어내 돌려줄 가능성에 대비해, 실제로 자료에 있던 id만 신뢰한다.
-    const hasEvidence = answer !== NO_EVIDENCE_ANSWER;
-    const usedIds = Array.isArray(parsed.usedProjectIds) ? parsed.usedProjectIds : [];
-    const sourceCardIds = hasEvidence
-      ? [...new Set(usedIds.filter((id) => knownProjectIds.has(id)))]
-      : [];
-
-    return { answer, sourceCardIds };
+    return { answer: stripProjectIds(synthesizedAnswer), sourceCardIds: relevantIds };
   } catch (err) {
     // OpenAI 호출 실패 등 어떤 이유로든 답변 생성에 실패하면 정해진 오류 문구로 답한다.
     console.error("챗봇 응답 생성 실패:", err);
