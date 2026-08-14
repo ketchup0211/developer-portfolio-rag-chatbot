@@ -11,20 +11,7 @@ import { useEffect, useState } from "react";
 import AuthedNav from "@/components/AuthedNav";
 import { RequireAuth } from "@/lib/auth/RequireAuth";
 import { createClient } from "@/lib/supabase/client";
-
-function toSessionSummary(row) {
-  const timestamps = (row.chat_messages || []).map((m) => m.created_at).sort();
-  const lastMessageAt = timestamps.length ? timestamps[timestamps.length - 1] : null;
-  const unread = !!lastMessageAt && (!row.last_read_at || lastMessageAt > row.last_read_at);
-  return { id: row.id, anonLabel: row.anon_label, lastMessageAt, unread };
-}
-
-function sortSessions(list) {
-  return [...list].sort((a, b) => {
-    if (a.unread !== b.unread) return a.unread ? -1 : 1;
-    return (b.lastMessageAt || "").localeCompare(a.lastMessageAt || "");
-  });
-}
+import { fetchSessionSummaries, sortSessions } from "@/lib/chat/sessionSummary";
 
 function QuestionsPageContent() {
   const [sessions, setSessions] = useState(null);
@@ -39,17 +26,12 @@ function QuestionsPageContent() {
     let active = true;
     async function loadSessions() {
       const supabase = createClient();
-      const { data, error: loadError } = await supabase
-        .from("chat_sessions")
-        .select("id, anon_label, last_read_at, chat_messages(created_at)")
-        .order("created_at", { ascending: false });
-
-      if (!active) return;
-      if (loadError) {
-        setError("대화 목록을 불러오지 못했습니다.");
-        return;
+      try {
+        const summaries = await fetchSessionSummaries(supabase);
+        if (active) setSessions(summaries);
+      } catch {
+        if (active) setError("대화 목록을 불러오지 못했습니다.");
       }
-      setSessions(sortSessions((data || []).map(toSessionSummary)));
     }
     loadSessions();
     return () => {
