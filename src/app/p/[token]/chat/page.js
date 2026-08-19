@@ -45,6 +45,40 @@ function toBubble(row) {
   };
 }
 
+// AI 답변에 포함된 "**강조**" 표시만 굵게 렌더링한다(그 외 마크다운은 프롬프트에서부터
+// 안 쓰도록 지시했으므로 여기서도 굵게 표시만 지원한다). dangerouslySetInnerHTML을 쓰지
+// 않고 텍스트를 조각내 React 엘리먼트로만 렌더링하므로 그대로 안전하다.
+function renderInlineBold(line, keyPrefix) {
+  const parts = line.split(/(\*\*[^*]+\*\*)/g).filter((part) => part !== "");
+  return parts.map((part, i) => {
+    const match = part.match(/^\*\*([^*]+)\*\*$/);
+    return match ? (
+      <strong key={`${keyPrefix}-${i}`}>{match[1]}</strong>
+    ) : (
+      <span key={`${keyPrefix}-${i}`}>{part}</span>
+    );
+  });
+}
+
+// 답변을 빈 줄 기준으로 문단(<p>)으로 나누고, 문단 안의 줄바꿈은 <br/>로 살린다.
+function renderFormattedAnswer(content) {
+  const paragraphs = (content || "").split(/\n{2,}/).filter((p) => p.trim() !== "");
+  const list = paragraphs.length > 0 ? paragraphs : [content || ""];
+  return list.map((paragraph, pIdx) => {
+    const lines = paragraph.split("\n");
+    return (
+      <p key={pIdx}>
+        {lines.map((line, lIdx) => (
+          <span key={lIdx}>
+            {renderInlineBold(line, `${pIdx}-${lIdx}`)}
+            {lIdx < lines.length - 1 && <br />}
+          </span>
+        ))}
+      </p>
+    );
+  });
+}
+
 export default function PublicChatPage() {
   const { token } = useParams();
   const { user, isOwner, loading: authLoading } = useAuth();
@@ -56,6 +90,12 @@ export default function PublicChatPage() {
   const [sending, setSending] = useState(false);
   const [limitReached, setLimitReached] = useState(false);
   const [cardsById, setCardsById] = useState({});
+  // 출처 칩 목록이 말풍선 폭을 넘어가면 슬라이딩(가로 스크롤)으로 보게 했는데(아래
+  // .chat-source-buttons), 그 스크롤 컨테이너가 넘치는 내용을 자르기 때문에 미리보기
+  // 카드를 칩 안에 CSS로만 띄우면 잘려 보인다. 그래서 미리보기 하나를 화면 전체 기준
+  // 고정 위치(position: fixed)로 따로 렌더링하고, 어느 칩 위에 마우스가 있는지만
+  // 이 상태로 추적한다.
+  const [hoverPreview, setHoverPreview] = useState(null); // { cardId, top, left } | null
   const listEndRef = useRef(null);
 
   // 0. 출처 칩 미리보기에 쓸 카드 제목/아이콘/속성을 미리 한 번 받아둔다.
@@ -221,6 +261,15 @@ export default function PublicChatPage() {
     );
   }
 
+  function showChipPreview(cardId, anchorEl) {
+    const rect = anchorEl.getBoundingClientRect();
+    setHoverPreview({ cardId, top: rect.top, left: rect.left });
+  }
+
+  function hideChipPreview() {
+    setHoverPreview(null);
+  }
+
   const ready = linkInfo?.valid && user && !isOwner && historyLoaded;
 
   return (
@@ -266,23 +315,27 @@ export default function PublicChatPage() {
 
             {messages.map((message) => (
               <div key={message.id} className={`chat-bubble chat-bubble-${message.role}`}>
-                <p>{message.content}</p>
+                {message.role === "assistant" ? (
+                  renderFormattedAnswer(message.content)
+                ) : (
+                  <p>{message.content}</p>
+                )}
                 {message.role === "assistant" && message.sourceCardIds?.length > 0 && (
+                  // 출처 칩이 말풍선 폭을 넘어가면(근거가 여러 개인 답변) 줄바꿈하지 않고
+                  // 가로로 슬라이딩해서 볼 수 있게 한다 — 말풍선 UI를 벗어나지 않도록.
                   <div className="chat-source-buttons">
                     {message.sourceCardIds.map((cardId) => {
                       const card = cardsById[cardId];
-                      const metaLines = card
-                        ? card.properties
-                            .map((p) => propertyValueToPlainText(p.type, p.value))
-                            .filter(Boolean)
-                            .slice(0, 2)
-                        : [];
                       return (
                         <span key={cardId} className="chat-source-chip-wrap">
                           <button
                             type="button"
                             className="chat-source-chip"
                             onClick={() => openSourcePopup(cardId)}
+                            onMouseEnter={(e) => showChipPreview(cardId, e.currentTarget)}
+                            onMouseLeave={hideChipPreview}
+                            onFocus={(e) => showChipPreview(cardId, e.currentTarget)}
+                            onBlur={hideChipPreview}
                           >
                             {card?.icon?.type === "emoji" && (
                               <span className="chat-source-chip-icon">{card.icon.value}</span>
@@ -291,19 +344,6 @@ export default function PublicChatPage() {
                               {card?.title || "출처"}
                             </span>
                           </button>
-                          {/* 마우스를 올리면(호버) 카드 제목·속성 미리보기를 보여주고,
-                              클릭하면 그 근거 카드 원문을 새 팝업창으로 연다(DESIGN.md 2.3). */}
-                          <div className="chat-source-preview">
-                            <p className="chat-source-preview-title">
-                              {card?.icon?.type === "emoji" && <span>{card.icon.value}</span>}
-                              <span>{card?.title || "출처 확인 중..."}</span>
-                            </p>
-                            {metaLines.map((line, index) => (
-                              <p className="chat-source-preview-meta" key={index}>
-                                {line}
-                              </p>
-                            ))}
-                          </div>
                         </span>
                       );
                     })}
@@ -337,6 +377,35 @@ export default function PublicChatPage() {
               보내기
             </button>
           </form>
+
+          {/* 출처 칩 미리보기(호버) — 칩을 담은 가로 스크롤 컨테이너 밖에 고정 위치로 따로
+              렌더링해서, 스크롤 컨테이너의 overflow에 잘리지 않게 한다. */}
+          {hoverPreview &&
+            (() => {
+              const card = cardsById[hoverPreview.cardId];
+              const metaLines = card
+                ? card.properties
+                    .map((p) => propertyValueToPlainText(p.type, p.value))
+                    .filter(Boolean)
+                    .slice(0, 2)
+                : [];
+              return (
+                <div
+                  className="chat-source-preview chat-source-preview-fixed"
+                  style={{ top: hoverPreview.top, left: hoverPreview.left }}
+                >
+                  <p className="chat-source-preview-title">
+                    {card?.icon?.type === "emoji" && <span>{card.icon.value}</span>}
+                    <span>{card?.title || "출처 확인 중..."}</span>
+                  </p>
+                  {metaLines.map((line, index) => (
+                    <p className="chat-source-preview-meta" key={index}>
+                      {line}
+                    </p>
+                  ))}
+                </div>
+              );
+            })()}
         </div>
       )}
     </>
