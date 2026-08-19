@@ -4,6 +4,8 @@
 ("이런 역량 있어?", "이런 기술 스택 써봤어?", "이런 개발 경험 있어?")에 답변하는 **RAG 챗봇이
 포함된 개발자 포트폴리오 웹사이트**입니다.
 
+🔗 배포 주소: [developer-portfolio-rag-chatbot.vercel.app](https://developer-portfolio-rag-chatbot.vercel.app)
+
 - 지원자는 자신의 프로젝트를 Notion Database에 카드 형태로 작성하고, 이 사이트는 Notion API로
   그 내용을 읽어와 갤러리뷰 형식으로 보여줍니다.
 - 인사 담당자는 지원자가 발급한 **초대 링크**로 로그인 없이 접속해 포트폴리오를 열람하고,
@@ -53,5 +55,10 @@ npm run dev
 
 ## 현재 개발 상태
 
-이 저장소는 개발 진행 중인 중간 산출물입니다. 진행 상황은 [PLAN.md](./PLAN.md)의 작업 목록을
-참고하세요.
+[PLAN.md](./PLAN.md)에 정의된 MVP 작업(포트폴리오 연동, RAG 챗봇, 초대 링크, 대화 기록 관리,
+noindex 적용 등 1~17번)을 모두 완료해 Vercel에 배포된 상태입니다. GitHub `main` 브랜치와
+Vercel 프로젝트가 연동되어 있어, `main`에 push(또는 PR merge)하면 자동으로 빌드·배포되고
+PR에는 프리뷰 배포가 생성됩니다.
+
+이후로는 RAG 응답 품질(다중 프로젝트 질문의 정확도, 답변 서식 등)과 챗봇 UI를 계속 다듬는
+중입니다.
